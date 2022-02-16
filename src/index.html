@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <script src="https://mempool.space/mempool.js"></script>
+    <script src='https://cdn.jsdelivr.net/npm/bignumber.js@9.0.2/bignumber.min.js'></script>
+
+    <script>
+        var addresses, transactions
+        const init = async () => {
+
+            const mempool = mempoolJS({
+                hostname: 'mempool.space'
+            });
+
+            addresses = mempool.bitcoin.addresses
+            transactions = mempool.bitcoin.transactions
+        };
+        init();
+
+        function parseTxHistory() {
+            const csvData = document.getElementById('txHistory').value || ''
+            const jsonData = csvData.split('\n').map(row => {
+                const fields = row.split(',')
+                return {
+                    date: fields[0],
+                    destination: fields[1],
+                    description: fields[2],
+                    amount: new BigNumber(+fields[3]).multipliedBy(100000000).toNumber(),
+                    currentcy: fields[4],
+                    txId: fields[5],
+                    creator: fields[6],
+                    copayers: fields[7],
+                    comment: fields[8],
+                }
+            })
+            console.log('### jsonData', jsonData)
+            return jsonData
+        }
+
+        async function process() {
+            const txHistory = parseTxHistory()
+
+            const status = {
+                endDate: txHistory[0] && txHistory[0].date && new Date(txHistory[0].date),
+                recordCount: txHistory.length,
+                feeCount: txHistory.filter(e => !e.txId).length,
+                receiveCount: txHistory.filter(e => e.amount >= 0).length,
+                sentCount: txHistory.filter(e => e.amount < 0 && e.txId).length,
+            }
+            let counter = 0
+            console.log('### status', status)
+            const addressTxList = {}
+
+            document.getElementById("result").textContent = JSON.stringify(status, undefined, 2);
+            for (const txData of txHistory.filter(e => e.txId)) {
+                // received txs
+                if (txData.amount > 0) {
+                    const tx = await transactions.getTx({ txid: txData.txId });
+                    const outs = tx.vout.filter(out => out.value === txData.amount)
+                    // console.log('### outs', outs)
+                    // console.log('### tx', tx)
+                    if (!outs || outs.length !== 1) {
+                        alert(`Cannot identify address for ${JSON.stringify(txData)}.\n Found ${(outs && outs.length) || 0} matching addresses!`)
+                        return
+                    }
+                    const out = outs[0]
+                    const address = out.scriptpubkey_address
+
+                    if (!addressTxList[`${address}`]) {
+                        console.log('### address', address)
+                        addressTxList[`${address}`] = []
+                        const addressTxs = await addresses.getAddressTxs({ address });
+                        console.log('### addressTxs', addressTxs)
+                        // const sendToAddrTxs = addressTxs.filter(t => t.vout.find(o => o.scriptpubkey_address === address))
+                        addressTxs.forEach(t => {
+                            t.vout.filter(o => o.scriptpubkey_address === address)
+                                .forEach(o => {
+                                    addressTxList[`${address}`].push({
+                                        value: o.value,
+                                        date: new Date(t.status.block_time * 1000)
+                                    })
+                                })
+                        })
+                    }
+
+                    document.getElementById("counter").textContent = ` processed ${++counter} of ${status.receiveCount}`
+                } else {
+
+                }
+
+
+            }
+            console.log('### addressTxList', addressTxList)
+        }
+
+
+    </script>
+</head>
+
+<body>
+    <h3>Paste your transaction history</h3>
+    <textarea id="txHistory" rows="25" cols="200"></textarea>
+    <hr />
+    <button onclick="process()">Process</button>
+    <span id="counter"></span>
+    <hr />
+    <pre id="result"></pre>
+</body>
+
+</html>
