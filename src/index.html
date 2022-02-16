@@ -4,6 +4,35 @@
 <head>
     <script src="https://mempool.space/mempool.js"></script>
     <script src='https://cdn.jsdelivr.net/npm/bignumber.js@9.0.2/bignumber.min.js'></script>
+    <style>
+        #addresses {
+            font-family: Arial, Helvetica, sans-serif;
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        #addresses td,
+        #addresses th {
+            border: 1px solid #ddd;
+            padding: 8px;
+        }
+
+        #addresses tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+
+        #addresses tr:hover {
+            background-color: #ddd;
+        }
+
+        #addresses th {
+            padding-top: 12px;
+            padding-bottom: 12px;
+            text-align: left;
+            background-color: #04AA6D;
+            color: white;
+        }
+    </style>
 
     <script>
         var addresses, transactions
@@ -18,9 +47,29 @@
         };
         init();
 
+        function addAddressRow(address, count, receiveAtEndDate, receiveTotal) {
+            const table = document.getElementById("addresses");
+            const row = table.insertRow(table.rows.length);
+            const cell1 = row.insertCell(0);
+            const cell2 = row.insertCell(1);
+            const cell3 = row.insertCell(2);
+            const cell4 = row.insertCell(3);
+            cell1.innerHTML = address;
+            cell2.innerHTML = count;
+            cell3.innerHTML = receiveAtEndDate;
+            cell4.innerHTML = receiveTotal;
+        }
+
+        function cleanAddressTable() {
+            const table = document.getElementById("addresses")
+            for (let i = table.rows.length - 1; i > 0; i--) {
+                table.deleteRow(i)
+            }
+        }
+
         function parseTxHistory() {
             const csvData = document.getElementById('txHistory').value || ''
-            const jsonData = csvData.split('\n').map(row => {
+            const jsonData = csvData.split('\n').filter(row => row && row.trim().length).map(row => {
                 const fields = row.split(',')
                 return {
                     date: fields[0],
@@ -39,17 +88,17 @@
         }
 
         async function process() {
+            cleanAddressTable()
             const txHistory = parseTxHistory()
 
             const status = {
-                endDate: txHistory[0] && txHistory[0].date && new Date(txHistory[0].date),
+                endDate: new Date(document.getElementById('endDate').value),
                 recordCount: txHistory.length,
                 feeCount: txHistory.filter(e => !e.txId).length,
                 receiveCount: txHistory.filter(e => e.amount >= 0).length,
                 sentCount: txHistory.filter(e => e.amount < 0 && e.txId).length,
             }
             let counter = 0
-            console.log('### status', status)
             const addressTxList = {}
 
             document.getElementById("result").textContent = JSON.stringify(status, undefined, 2);
@@ -77,16 +126,22 @@
                             t.vout.filter(o => o.scriptpubkey_address === address)
                                 .forEach(o => {
                                     addressTxList[`${address}`].push({
+                                        txId: t.txid,
                                         value: o.value,
                                         date: new Date(t.status.block_time * 1000)
                                     })
                                 })
                         })
+                        const receivedTotal = addressTxList[`${address}`].reduce((total, out) => total + out.value, 0)
+                        const receivedAtEndDate = addressTxList[`${address}`]
+                            .filter(out => out.date.getTime() < status.endDate.getTime())
+                            .reduce((total, out) => total + out.value, 0)
+                        addAddressRow(address, addressTxList[`${address}`].length, receivedAtEndDate, receivedTotal)
                     }
 
                     document.getElementById("counter").textContent = ` processed ${++counter} of ${status.receiveCount}`
                 } else {
-
+                    // nothing yet
                 }
 
 
@@ -102,10 +157,21 @@
     <h3>Paste your transaction history</h3>
     <textarea id="txHistory" rows="25" cols="200"></textarea>
     <hr />
+    <label for="endDate">End Date (yyyy-MM-ddTHH:mm:ss)</label>
+    <input id="endDate" type="text" value="2021-12-31T00:00:00">
     <button onclick="process()">Process</button>
+
     <span id="counter"></span>
     <hr />
     <pre id="result"></pre>
+    <table id="addresses">
+        <tr>
+            <th>Address</th>
+            <th>Receive Count</th>
+            <th>Receive At End Date (sats)</th>
+            <th>Receive Total (sats)</th>
+        </tr>
+    </table>
 </body>
 
 </html>
