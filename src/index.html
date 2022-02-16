@@ -83,7 +83,6 @@
                     comment: fields[8],
                 }
             })
-            console.log('### jsonData', jsonData)
             return jsonData
         }
 
@@ -102,13 +101,12 @@
             const addressTxList = {}
 
             document.getElementById("result").textContent = JSON.stringify(status, undefined, 2);
+            document.getElementById("allReceivedPayments").value = ''
             for (const txData of txHistory.filter(e => e.txId)) {
                 // received txs
                 if (txData.amount > 0) {
                     const tx = await transactions.getTx({ txid: txData.txId });
                     const outs = tx.vout.filter(out => out.value === txData.amount)
-                    // console.log('### outs', outs)
-                    // console.log('### tx', tx)
                     if (!outs || outs.length !== 1) {
                         alert(`Cannot identify address for ${JSON.stringify(txData)}.\n Found ${(outs && outs.length) || 0} matching addresses!`)
                         return
@@ -117,11 +115,9 @@
                     const address = out.scriptpubkey_address
 
                     if (!addressTxList[`${address}`]) {
-                        console.log('### address', address)
                         addressTxList[`${address}`] = []
                         const addressTxs = await addresses.getAddressTxs({ address });
-                        console.log('### addressTxs', addressTxs)
-                        // const sendToAddrTxs = addressTxs.filter(t => t.vout.find(o => o.scriptpubkey_address === address))
+                        
                         addressTxs.forEach(t => {
                             t.vout.filter(o => o.scriptpubkey_address === address)
                                 .forEach(o => {
@@ -146,7 +142,9 @@
 
 
             }
-            console.log('### addressTxList', addressTxList)
+            document.getElementById("allReceivedPayments").value = Object.keys(addressTxList)
+                .map(k => addressTxList[k].map(a => `${a.date.toISOString()},${k},${a.txId},${a.value}`).join('\n'))
+                .join('\n')
         }
 
 
@@ -172,6 +170,10 @@
             <th>Receive Total (sats)</th>
         </tr>
     </table>
+    <hr />
+    <h3>All Received Payments (date, address, txId, value)</h3>
+    <textarea id="allReceivedPayments" rows="25" cols="200"></textarea>
+    
 </body>
 
 </html>
