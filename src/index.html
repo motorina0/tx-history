@@ -47,17 +47,26 @@
         };
         init();
 
-        function addAddressRow(address, count, receiveAtEndDate, receiveTotal) {
+
+        function addAddressRow(address, count, receiveAtEndDate, receiveTotal, spentdAtEndDate, spentTotal) {
             const table = document.getElementById("addresses");
             const row = table.insertRow(table.rows.length);
             const cell1 = row.insertCell(0);
             const cell2 = row.insertCell(1);
             const cell3 = row.insertCell(2);
             const cell4 = row.insertCell(3);
+            const cell5 = row.insertCell(4);
+            const cell6 = row.insertCell(5);
+            const cell7 = row.insertCell(6);
+            const cell8 = row.insertCell(7);
             cell1.innerHTML = address;
             cell2.innerHTML = count;
             cell3.innerHTML = receiveAtEndDate;
-            cell4.innerHTML = receiveTotal;
+            cell4.innerHTML = spentdAtEndDate;
+            cell5.innerHTML = receiveAtEndDate + spentdAtEndDate;
+            cell6.innerHTML = receiveTotal;
+            cell7.innerHTML = spentTotal;
+            cell8.innerHTML = receiveTotal + spentTotal;
         }
 
         function cleanAddressTable() {
@@ -87,64 +96,94 @@
         }
 
         async function process() {
-            cleanAddressTable()
-            const txHistory = parseTxHistory()
+            try {
+                cleanAddressTable()
+                const txHistory = parseTxHistory()
 
-            const status = {
-                endDate: new Date(document.getElementById('endDate').value),
-                recordCount: txHistory.length,
-                feeCount: txHistory.filter(e => !e.txId).length,
-                receiveCount: txHistory.filter(e => e.amount >= 0).length,
-                sentCount: txHistory.filter(e => e.amount < 0 && e.txId).length,
-            }
-            let counter = 0
-            const addressTxList = {}
-
-            document.getElementById("result").textContent = JSON.stringify(status, undefined, 2);
-            document.getElementById("allReceivedPayments").value = ''
-            for (const txData of txHistory.filter(e => e.txId)) {
-                // received txs
-                if (txData.amount > 0) {
-                    const tx = await transactions.getTx({ txid: txData.txId });
-                    const outs = tx.vout.filter(out => out.value === txData.amount)
-                    if (!outs || outs.length !== 1) {
-                        alert(`Cannot identify address for ${JSON.stringify(txData)}.\n Found ${(outs && outs.length) || 0} matching addresses!`)
-                        return
-                    }
-                    const out = outs[0]
-                    const address = out.scriptpubkey_address
-
-                    if (!addressTxList[`${address}`]) {
-                        addressTxList[`${address}`] = []
-                        const addressTxs = await addresses.getAddressTxs({ address });
-                        
-                        addressTxs.forEach(t => {
-                            t.vout.filter(o => o.scriptpubkey_address === address)
-                                .forEach(o => {
-                                    addressTxList[`${address}`].push({
-                                        txId: t.txid,
-                                        value: o.value,
-                                        date: new Date(t.status.block_time * 1000)
-                                    })
-                                })
-                        })
-                        const receivedTotal = addressTxList[`${address}`].reduce((total, out) => total + out.value, 0)
-                        const receivedAtEndDate = addressTxList[`${address}`]
-                            .filter(out => out.date.getTime() < status.endDate.getTime())
-                            .reduce((total, out) => total + out.value, 0)
-                        addAddressRow(address, addressTxList[`${address}`].length, receivedAtEndDate, receivedTotal)
-                    }
-
-                    document.getElementById("counter").textContent = ` processed ${++counter} of ${status.receiveCount}`
-                } else {
-                    // nothing yet
+                const status = {
+                    endDate: new Date(document.getElementById('endDate').value),
+                    recordCount: txHistory.length,
+                    feeCount: txHistory.filter(e => !e.txId).length,
+                    receiveCount: txHistory.filter(e => e.amount >= 0).length,
+                    sentCount: txHistory.filter(e => e.amount < 0 && e.txId).length,
                 }
+                let counter = 0
+                const addressTxList = {}
+
+                document.getElementById("result").textContent = JSON.stringify(status, undefined, 2);
+                document.getElementById("allReceivedPayments").value = ''
+                for (const txData of txHistory.filter(e => e.txId)) {
+                    // received txs
+                    if (txData.amount > 0) {
+                        const tx = await transactions.getTx({ txid: txData.txId });
+                        const outs = tx.vout.filter(out => out.value === txData.amount)
+                        if (!outs || outs.length !== 1) {
+                            alert(`Cannot identify address for ${JSON.stringify(txData)}.\n Found ${(outs && outs.length) || 0} matching addresses!`)
+                            return
+                        }
+                        const out = outs[0]
+                        const address = out.scriptpubkey_address
+
+                        if (!addressTxList[`${address}`]) {
+                            addressTxList[`${address}`] = []
+                            const addressTxs = await addresses.getAddressTxs({ address });
 
 
+                            addressTxs.forEach(t => {
+                                t.vin.filter(i => i.prevout.scriptpubkey_address === address)
+                                    .forEach(i => {
+                                        addressTxList[`${address}`].push({
+                                            type: 'spend',
+                                            txId: t.txid,
+                                            value: -i.prevout.value,
+                                            date: new Date(t.status.block_time * 1000)
+                                        })
+                                    })
+                            })
+                            addressTxs.forEach(t => {
+                                t.vout.filter(o => o.scriptpubkey_address === address)
+                                    .forEach(o => {
+                                        addressTxList[`${address}`].push({
+                                            type: 'receive',
+                                            txId: t.txid,
+                                            value: o.value,
+                                            date: new Date(t.status.block_time * 1000)
+                                        })
+                                    })
+                            })
+
+                            const receivedTotal = addressTxList[`${address}`]
+                                .filter(a => a.type === 'receive')
+                                .reduce((total, out) => total + out.value, 0)
+                            const receivedAtEndDate = addressTxList[`${address}`]
+                                .filter(a => a.type === 'receive')
+                                .filter(out => out.date.getTime() < status.endDate.getTime())
+                                .reduce((total, out) => total + out.value, 0)
+
+                            const spentTotal = addressTxList[`${address}`]
+                                .filter(a => a.type === 'spend')
+                                .reduce((total, out) => total + out.value, 0)
+                            const spentdAtEndDate = addressTxList[`${address}`]
+                                .filter(a => a.type === 'spend')
+                                .filter(out => out.date.getTime() < status.endDate.getTime())
+                                .reduce((total, out) => total + out.value, 0)
+
+                            addAddressRow(address, addressTxList[`${address}`].length, receivedAtEndDate, receivedTotal, spentdAtEndDate, spentTotal)
+                        }
+
+                        document.getElementById("counter").textContent = ` processed ${++counter} of ${status.receiveCount}`
+                    } else {
+                        // nothing yet
+                    }
+
+
+                }
+                document.getElementById("allReceivedPayments").value = Object.keys(addressTxList)
+                    .map(k => addressTxList[k].map(a => `${a.date.toISOString()},${k},${a.txId},${a.value}`).join('\n'))
+                    .join('\n')
+            } catch (err) {
+                alert(err)
             }
-            document.getElementById("allReceivedPayments").value = Object.keys(addressTxList)
-                .map(k => addressTxList[k].map(a => `${a.date.toISOString()},${k},${a.txId},${a.value}`).join('\n'))
-                .join('\n')
         }
 
 
@@ -166,14 +205,20 @@
         <tr>
             <th>Address</th>
             <th>Receive Count</th>
-            <th>Receive At End Date (sats)</th>
-            <th>Receive Total (sats)</th>
+
+            <th>Receive At End Date</th>
+            <th>Spent At End Date</th>
+            <th>Balance At End Date</th>
+           
+            <th>Receive Total</th>
+            <th>Spent Total</th>
+            <th>Balance Total</th>
         </tr>
     </table>
     <hr />
     <h3>All Received Payments (date, address, txId, value)</h3>
     <textarea id="allReceivedPayments" rows="25" cols="200"></textarea>
-    
+
 </body>
 
 </html>
