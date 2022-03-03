@@ -97,13 +97,20 @@
 
         async function buildPackageForTx(txId) {
             const tx = await transactions.getTx({ txid: txId });
-            console.log('### tx', tx)
-            let txList = [tx]
+            const ancestors = await fetchAncestorTxs(tx)
+
+            const decscendats = await fetchDecendantTxs(tx)
+            return [tx].concat(ancestors).concat(decscendats)
+        }
+
+        async function fetchAncestorTxs(tx) {
+            let txList = []
             for (const input of tx.vin) {
                 const parentTx = await transactions.getTx({ txid: input.txid });
                 // part of the same package
                 if (parentTx.status.block_height && (parentTx.status.block_height === tx.status.block_height)) {
-                    const ancestorTxList = await buildPackageForTx(parentTx.txid)
+                    txList.push(parentTx)
+                    const ancestorTxList = await fetchAncestorTxs(parentTx)
                     txList = txList.concat(ancestorTxList)
                 }
             }
@@ -112,13 +119,43 @@
             return txList
         }
 
-        async function fetchChildTxs(txId) {
-            const tx = await transactions.getTx({ txid: txId });
+        async function fetchDecendantTxs(tx) {
+            let txList = []
+            const txOutspends = await transactions.getTxOutspends({ txid: tx.txid });
+            console.log('### txOutspends', txOutspends.length)
+            // console.log('###  tx.status.block_height',  tx.status.block_height, txOutspends.filter(outTx => outTx.spent).map(t => t.status.block_height))
+            const samePackageTxList = txOutspends.filter(outTx => outTx.spent && outTx.status.block_height === tx.status.block_height)
+            console.log('### samePackageTxList',  samePackageTxList)
+
+            // part of the same package
+            for (const spentChildTx of samePackageTxList) {
+                const childTx = await transactions.getTx({ txid: spentChildTx.txid });
+                txList.push(childTx)
+                // const descendentTxList = await fetchDecendantTxs(childTx)
+                // txList = txList.concat(descendentTxList)
+            }
+
+            return txList
+        }
+
+        async function fetchDecendantTxsOld(tx) {
+            const txList = []
             for (const output of tx.vout) {
                 const childTxList = await addresses.getAddressTxs({ address: output.scriptpubkey_address });
                 console.log('### childTxList', childTxList)
-
+                for (const childTx of childTxList) {
+                    // part of the same package
+                    if (childTx.status.block_height
+                        && (childTx.status.block_height === tx.status.block_height)
+                        && (childTx.txid !== tx.txid)) {
+                        console.log('### found child ', childTx)
+                        txList.push(childTx)
+                        const descendentTxList = await fetchDecendantTxs(childTx)
+                        txList = txList.concat(descendentTxList)
+                    }
+                }
             }
+            return txList
         }
 
         async function process() {
@@ -150,7 +187,7 @@
 
 <body>
     <h3>Paste your transaction IDs</h3>
-    <textarea id="txIdList" rows="25" cols="200"></textarea>
+    <textarea id="txIdList" rows="10" cols="200"></textarea>
     <hr />
     <button onclick="process()">Process</button>
     <hr />
