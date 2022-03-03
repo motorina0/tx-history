@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <script src="https://mempool.space/mempool.js"></script>
+    <script src='https://cdn.jsdelivr.net/npm/bignumber.js@9.0.2/bignumber.min.js'></script>
+    <style>
+        #packages {
+            font-family: Arial, Helvetica, sans-serif;
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        #packages td,
+        #packages th {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: right;
+        }
+
+        #packages tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+
+        #packages tr:hover {
+            background-color: #ddd;
+        }
+
+        #packages th {
+            padding-top: 12px;
+            padding-bottom: 12px;
+            text-align: left;
+            background-color: #04AA6D;
+            color: white;
+        }
+    </style>
+
+    <script>
+        var addresses, transactions
+        const init = async () => {
+
+            const mempool = mempoolJS({
+                hostname: 'mempool.space'
+            });
+
+            addresses = mempool.bitcoin.addresses
+            transactions = mempool.bitcoin.transactions
+        };
+        init();
+
+
+        function addPackageRows(packageTxList = [], index) {
+            const table = document.getElementById("packages");
+            const packageRow = table.insertRow(table.rows.length);
+            for (let i = 0; i < 8; i++) {
+                packageRow.insertCell(i);
+            }
+            packageRow.cells[0].innerHTML = `Package ${index}`
+            let packageWeight = 0, packageFees = 0
+            packageTxList.forEach((pTx) => {
+                packageWeight += pTx.weight
+                packageFees += pTx.fee
+            })
+            const packageVSize = packageWeight / 4
+
+            packageRow.cells[1].innerHTML = packageVSize.toFixed(2)
+            packageRow.cells[2].innerHTML = packageFees;
+            packageRow.cells[3].innerHTML = (packageFees / packageVSize).toFixed(2);
+
+            packageTxList.forEach((tx, txIndex) => {
+                const txVSize = tx.weight / 4;
+                const row = table.insertRow(table.rows.length);
+                for (let i = 0; i < 8; i++) {
+                    row.insertCell(i);
+                }
+
+                row.cells[4].innerHTML = tx.txid
+                row.cells[5].innerHTML = txVSize.toFixed(2);
+                row.cells[6].innerHTML = tx.fee;
+                row.cells[7].innerHTML = (tx.fee / txVSize).toFixed(2)
+            })
+
+        }
+
+        function cleanPackagesTable() {
+            const table = document.getElementById("packages")
+            for (let i = table.rows.length - 1; i > 0; i--) {
+                table.deleteRow(i)
+            }
+        }
+
+        function parseTxIdList() {
+            const csvData = document.getElementById('txIdList').value || ''
+            const txIds = csvData.split('\n').filter(row => row && row.trim().length)
+            return txIds
+        }
+
+        async function buildPackageForTx(txId) {
+            const tx = await transactions.getTx({ txid: txId });
+            console.log('### tx', tx)
+            let txList = [tx]
+            for (const input of tx.vin) {
+                const parentTx = await transactions.getTx({ txid: input.txid });
+                // part of the same package
+                if (parentTx.status.block_height && (parentTx.status.block_height === tx.status.block_height)) {
+                    const ancestorTxList = await buildPackageForTx(parentTx.txid)
+                    txList = txList.concat(ancestorTxList)
+                }
+            }
+
+
+            return txList
+        }
+
+        async function fetchChildTxs(txId) {
+            const tx = await transactions.getTx({ txid: txId });
+            for (const output of tx.vout) {
+                const childTxList = await addresses.getAddressTxs({ address: output.scriptpubkey_address });
+                console.log('### childTxList', childTxList)
+
+            }
+        }
+
+        async function process() {
+            try {
+                console.log('### start processing')
+                cleanPackagesTable()
+                const txIdList = parseTxIdList()
+
+                const packages = []
+                for (const txId of txIdList) {
+                    const package = await buildPackageForTx(txId)
+                    packages.push(package)
+                }
+
+                packages.forEach((p, i) => {
+                    addPackageRows(p, i)
+                })
+
+                console.log('### end processing')
+            } catch (err) {
+                console.log('### error processing')
+                alert(err)
+            }
+        }
+
+
+    </script>
+</head>
+
+<body>
+    <h3>Paste your transaction IDs</h3>
+    <textarea id="txIdList" rows="25" cols="200"></textarea>
+    <hr />
+    <button onclick="process()">Process</button>
+    <hr />
+    <table id="packages">
+        <tr>
+            <th>Package Number</th>
+
+            <th>Package Size</th>
+            <th>Package Fees</th>
+            <th>Package Fee Rate</th>
+
+            <th>Transction ID</th>
+            <th>VSize (vbytes)</th>
+            <th>Fee (sats)</th>
+            <th>Fee Rate (sat/vB)</th>
+
+
+        </tr>
+    </table>
+
+</body>
+
+</html>
